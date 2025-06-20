@@ -23,4 +23,11 @@ node_t *load_trie(char *file_path);
 
 words_t* trie_to_words(node_t *node);
 
-word_t* find_word(node_t* root, char* text);
+word_t *find_word(node_t *root, char *text);
+
+node_t *find_prefix(node_t *node, char *s);
+
+void free_words(words_t *words);
+
+words_t *prefix_to_words(node_t* root, char* prefix);
+

@@ -87,6 +87,21 @@ void add_text(node_t* root, char* text, size_t text_len) {
     }
 }
 
+node_t *find_prefix(node_t* node, char* s) {
+    if (*s == '\0') {
+        return node;
+    }
+    
+    ssize_t idx = find_child(node, *s);
+
+    if (idx != -1) {
+        node_t* child = node->children[idx];
+        return find_prefix(child, s + 1);
+    } else {
+        return NULL;
+    }
+}
+
 node_t* load_trie(char* file_path) {
     int fd = open(file_path, O_RDONLY);
     if (fd == -1) {
@@ -138,6 +153,11 @@ words_t* allocate_words() {
     words->len = 0;
 
     return words;
+}
+
+void free_words(words_t* words) {
+    free(words->words);
+    free(words);
 }
 
 int cmp_words_freq(const void* w1, const void* w2) {
@@ -197,6 +217,30 @@ words_t* trie_to_words(node_t* node) {
     qsort(words->words, words->len, sizeof(word_t), cmp_words_freq);
 
     return words;
+}
+
+words_t *prefix_to_words(node_t* root, char* prefix) {
+    node_t* node = find_prefix(root, prefix);
+
+    if (node != NULL) {
+        size_t prefix_len = strlen(prefix);
+        
+        memset(word_buf, 0, WORD_BUF_SIZE);
+
+        memcpy(word_buf, prefix, prefix_len);
+        
+        word_buf_len = prefix_len;
+
+        words_t* words = allocate_words();
+
+        trie_to_words_iter(node, words);
+
+        qsort(words->words, words->len, sizeof(word_t), cmp_words_freq);
+
+        return words;        
+    } else {
+        return NULL;
+    }
 }
 
 word_t* find_word(node_t* root, char* text) {
