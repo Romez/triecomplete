@@ -4,6 +4,7 @@
 #include <ncurses.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <sys/signalfd.h>
 #include <sys/epoll.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -95,24 +96,51 @@ int main(int argc, char* argv[]) {
 
     // -----------
 
-    // Register Event
+    // Create signalfd for SIGINT
+
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+
+    sigprocmask(SIG_BLOCK, &mask, NULL); // disable default SIGINT handler
+
+    int sig_fd = signalfd(-1, &mask, 0);
+    if (sig_fd == -1) {
+        perror("signalfd");
+        exit(1);
+    }
+
+    // --------------------------
+
+    // Register Screen Input Event
 
     struct epoll_event ep_event;
 
     ep_event.events = EPOLLIN;
-    ep_event.data.fd = pipe_fd[0]; // The only way to unders the source of event
+    ep_event.data.fd = pipe_fd[0]; // The only way to get the source of the event
 
     if (epoll_ctl(ep_fd, EPOLL_CTL_ADD, pipe_fd[0], &ep_event) == -1) {
         perror("epoll ctl pipe");
         exit(1);
     }
 
-    // -------------
+    // --------------------------
+
+    // Register SIGINT event
+
+    ep_event.events = EPOLLIN;
+    ep_event.data.fd = sig_fd;
+
+    if (epoll_ctl(ep_fd, EPOLL_CTL_ADD, sig_fd, &ep_event) == -1) {
+        perror("epoll ctl eventfd");
+        exit(1);
+    }
+
+    // --------------------
 
     // Read Input Buffer
 
     char buf[READ_BUF_SIZE] = {0};
-    size_t buf_len = 0;
 
     // -------------
 
@@ -153,12 +181,13 @@ int main(int argc, char* argv[]) {
     pthread_t screen_thread;
 
     pthread_create(&screen_thread, NULL, screen_input, &pipe_fd[1]);
+    pthread_detach(screen_thread);
 
     // epoll wait
 
     struct epoll_event events[MAX_EVENTS];
 
-    while(true) {
+    while(running) {
         int events_count = epoll_wait(ep_fd, events, MAX_EVENTS, -1);
         if (events_count == -1) {
             perror("epoll wait");
@@ -225,13 +254,14 @@ int main(int argc, char* argv[]) {
                 }
 
                 refresh();
+            } else if (sig_fd == ev_fd) {
+                running = false;
+                break;
             } else {
                 assert(NULL && "Unreachable");
             }
         }
     }
-
-    pthread_join(screen_thread, NULL);
 
     endwin();
 
