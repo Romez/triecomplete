@@ -63,15 +63,13 @@ void add_text(node_t* root, char* text, size_t text_len) {
     for (size_t i = 0; i < text_len; i++) {
         unsigned char c = text[i];
 
-        if (65 <= c && c <= 90) {
+        if ('A' <= c && c <= 'Z') {
             assert(word_buf_len < WORD_BUF_SIZE);
             word_buf[word_buf_len++] = tolower(c);
-        }
-        else if (97 <= c && c <= 122) {
+        } else if ('a' <= c && c <= 'z') {
             assert(word_buf_len < WORD_BUF_SIZE);
             word_buf[word_buf_len++] = c;
-        }
-        else {
+        } else {
             if (word_buf_len > 0) {
                 add_word(root, word_buf);
                 memset(word_buf, 0, WORD_BUF_SIZE);

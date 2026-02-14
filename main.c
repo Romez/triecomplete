@@ -13,12 +13,14 @@
 #include "trie.h"
 
 #define READ_BUF_SIZE 1024
-#define SEARCH_BUF_SIZE 1024
+#define INPUT_BUF_SIZE 1024
 #define MAX_EVENTS 8
 
 #define BREAK_LINT_ROW 1
 #define WORDS_COUNT_ROW 2
 #define WORDS_ROW 3
+
+#define DELETE_ASCII_CHAR 127
 
 bool running = true;
 
@@ -45,11 +47,11 @@ void draw_break_line(int cols) {
 }
 
 void *screen_input(void* args) {
-    int pipe_fd = *(int*)args;
-    char buf[1];
+    int pipe_fd = *(int*)args; // write end
+	char buf[1];
 
     while(true) {
-        int c = getch();
+        int c = getch(); // user input
 
         if (('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')) {
             buf[0] = c;
@@ -59,8 +61,8 @@ void *screen_input(void* args) {
                 exit(1);
             }
 
-        } else if (c == KEY_BACKSPACE || c == 127 || c == 8) {
-            buf[0] = 127;
+        } else if (c == KEY_BACKSPACE || c == DELETE_ASCII_CHAR || c == 8) {
+            buf[0] = DELETE_ASCII_CHAR;
             ssize_t bytes_written = write(pipe_fd, buf, 1);
             if (bytes_written == -1) {
                 perror("write char");
@@ -78,7 +80,7 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
 
-    // signal(SIGINT, handle_exit);
+	char* file_path = argv[1];
 
     int ep_fd = epoll_create(1);
     if (ep_fd == -1) {
@@ -87,17 +89,13 @@ int main(int argc, char* argv[]) {
     }
 
     // Create Pipe
-
     int pipe_fd[2];
     if (pipe2(pipe_fd, O_NONBLOCK) == -1) {
         perror("pipe");
         exit(1);
     }
 
-    // -----------
-
     // Create signalfd for SIGINT
-
     sigset_t mask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGINT);
@@ -113,7 +111,6 @@ int main(int argc, char* argv[]) {
     // --------------------------
 
     // Register Screen Input Event
-
     struct epoll_event ep_event;
 
     ep_event.events = EPOLLIN;
@@ -126,8 +123,7 @@ int main(int argc, char* argv[]) {
 
     // --------------------------
 
-    // Register SIGINT event
-
+    // Register SIGINT event ----
     ep_event.events = EPOLLIN;
     ep_event.data.fd = sig_fd;
 
@@ -136,18 +132,16 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
 
-    // --------------------
+    // ----------------------
 
-    // Read Input Buffer
+    // Read Input Buffer ----
 
     char buf[READ_BUF_SIZE] = {0};
 
     // -------------
 
-    // Search Buffer
-
-    char search_buf[SEARCH_BUF_SIZE] = {0};
-    size_t search_buf_len = 0;
+    char input_buf[INPUT_BUF_SIZE] = {0};
+    size_t input_buf_len = 0;
 
     // ------------
 
@@ -155,20 +149,20 @@ int main(int argc, char* argv[]) {
     initscr();
     noecho();
 
+	// get screen size
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
 
     draw_break_line(cols);
 
-    move(0, 0);
+    move(rows - 1, 0);
     printw(">");
-    move(0, 1);
+    move(rows - 1, 1);
 
     // ------------
 
-    // Create Trie
-
-    node_t* trie = load_trie(argv[1]);
+    // Init Trie
+    node_t* trie = load_trie(file_path);
 
     // TODO: exit if NULL with message
 
@@ -194,25 +188,28 @@ int main(int argc, char* argv[]) {
             exit(1);
         }
 
+		// two types of events
+		// user input and ctrl+c
         for (int i = 0; i < events_count; i++) {
             int ev_fd = events[i].data.fd;
 
+			// user input
             if (ev_fd == pipe_fd[0]) {
-                int read_bytes = read(pipe_fd[0], buf, READ_BUF_SIZE);
-                if (read_bytes == -1) {
+                int bytes_read = read(pipe_fd[0], buf, READ_BUF_SIZE);
+                if (bytes_read == -1) {
                     perror("read pipe");
-                        exit(1);
+					exit(1);
                 }
 
-                for (int i = 0; i < read_bytes; i++) {
+                for (int i = 0; i < bytes_read; i++) {
                     int c = buf[i];
                     if (c == 127) {
-                        if (search_buf_len > 0) {
-                            search_buf_len--;
-                            search_buf[search_buf_len] = '\0';
+                        if (input_buf_len > 0) {
+                            input_buf_len--;
+                            input_buf[input_buf_len] = '\0';
                         }
                     } else {
-                        search_buf[search_buf_len++] = c;
+                        input_buf[input_buf_len++] = c;
                     }
                 }
 
@@ -222,9 +219,9 @@ int main(int argc, char* argv[]) {
                 move(0, 0);
                 clrtoeol();
 
-                printw(">%s", search_buf);
+                printw(">%s", input_buf);
 
-                if (search_buf_len == 0) {
+                if (input_buf_len == 0) {
                     print_words_count(0);
                     clear_words_list(rows);
                 } else {
@@ -233,7 +230,7 @@ int main(int argc, char* argv[]) {
                         words = NULL;
                     }
 
-                    words = prefix_to_words(trie, search_buf);
+                    words = prefix_to_words(trie, input_buf);
 
                     clear_words_list(rows);
 
@@ -254,11 +251,11 @@ int main(int argc, char* argv[]) {
                 }
 
                 refresh();
-            } else if (sig_fd == ev_fd) {
+            } else if (ev_fd == sig_fd) { // ctrl + c
                 running = false;
                 break;
             } else {
-                assert(NULL && "Unreachable");
+                assert(NULL && "Unexpected event");
             }
         }
     }
